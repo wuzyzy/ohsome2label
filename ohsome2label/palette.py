@@ -7,8 +7,17 @@ import os
 class palette:
     """palette for burning tile."""
 
-    def __init__(self, tags=None, path="colors"):
+    def __init__(self, _tags=None, path="colors"):
         self.path = path
+        tags = []
+        for _t in _tags:
+            if "__main." in _t["label"]:
+                _t["label"] = _t["label"].replace("__main.", "")
+                tags.append(_t)
+            elif "__sub." in _t["label"]:
+                continue
+            else:
+                tags.append(_t)
         if tags is None:
             self.load()
         else:

@@ -1,4 +1,5 @@
 import os
+import shutil
 
 import numpy as np
 from requests import exceptions
@@ -106,6 +107,8 @@ def download_img(cfg, workspace):
     tgt_dir = workspace.tmp
     tile_list = os.path.join(workspace.other, "tile_list")
     tiles = []
+
+    label_imgs = os.listdir(workspace.label)
     with open(tile_list, "r") as tl:
         tiles = [_.replace("\n", "") for _ in tl]
     api = cfg.img_api.lower()
@@ -134,6 +137,9 @@ def download_img(cfg, workspace):
             fname = "{0.z}.{0.x}.{0.y}.png".format(tile)
         fpath = os.path.join(tgt_dir, fname)
         download(fpath, url)
+        if fname in label_imgs:
+            shutil.copy(fpath, os.path.join(workspace.img,fname))
+
 
 
 def valid_coco():

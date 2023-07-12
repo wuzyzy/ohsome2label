@@ -3,7 +3,9 @@ import os
 from datetime import datetime
 
 import geojson
-from geojson import FeatureCollection
+
+import shutil
+from geojson import FeatureCollection, Feature
 from PIL import Image, ImageDraw
 from shapely.geometry import MultiPolygon, Polygon, box, shape
 from shapely.strtree import STRtree
@@ -191,12 +193,22 @@ class geococo(object):
     def __exit__(self, *exc):
         return True
 
-    def tags_to_cats(self, tags):
+    def tags_to_cats(self, _tags):
         """Convert tags to coco categories."""
         self.catIdxs = {}
         self.cats = []
 
         _label = {}
+
+        tags = []
+        for _t in _tags:
+            if "__main." in _t["label"]:
+                _t["label"] = _t["label"].replace("__main.", "")
+                tags.append(_t)
+            elif "__sub." in _t["label"]:
+                continue
+            else:
+                tags.append(_t)
         for tag in tags:
             if tag["label"] not in _label:
                 _label[tag["label"]] = len(_label)
@@ -237,9 +249,42 @@ def gen_label(cfg, workspace):
     # open downloaded geojson file
     if cfg.api == "ohsome":
         for tag in cfg.tags:
-            fname = "{lab}_{k}_{v}.geojson".format(
-                lab=tag["label"], k=tag["key"], v=tag["value"]
-            )
+            if "__main" in tag["label"]:
+                main_geojson = "{lab}_{k}_{v}.geojson".format(
+                    lab=tag["label"], k=tag["key"], v=tag["value"]
+                )
+                output_geojson = main_geojson.replace("__main.", "")
+                sub_label = tag["label"].replace("__main.", "__sub.")
+                sub_geojson = ""
+                for _t in cfg.tags:
+                    if _t["label"] == sub_label:
+                        sub_geojson = "{lab}_{k}_{v}.geojson".format(
+                            lab=_t["label"], k=_t["key"], v=_t["value"]
+                        )
+                if sub_geojson == "":
+                    if not os.path.exists(os.path.join(workspace.raw, output_geojson)):
+                        shutil.copy(
+                            os.path.join(workspace.raw, main_geojson),
+                            os.path.join(workspace.raw, output_geojson),
+                        )
+                else:
+                    label = tag["label"].split(".")[-1]
+                    if not os.path.exists(os.path.join(workspace.raw, output_geojson)):
+                        print(f"Start to merge {label} geojson")
+                        _overlap(
+                            os.path.join(workspace.raw, main_geojson),
+                            os.path.join(workspace.raw, sub_geojson),
+                            os.path.join(workspace.raw, output_geojson),
+                            label,
+                        )
+                fname = output_geojson
+            elif "__sub" in tag["label"]:
+                continue
+            else:
+                label = tag["label"]
+                fname = "{lab}_{k}_{v}.geojson".format(
+                    lab=tag["label"], k=tag["key"], v=tag["value"]
+                )
             fpath = os.path.join(workspace.raw, fname)
             # get valid tile
             with open(fpath, encoding="utf-8") as f:
@@ -248,7 +293,7 @@ def gen_label(cfg, workspace):
                 for feature in features:
                     geom = shape(feature["geometry"])
                     geoms.append(geom)
-                    feature["properties"]["label"] = tag["label"]
+                    feature["properties"]["label"] = label
                     feats[geom.to_wkb()] = feature
     elif cfg.api == "overpass":
         fname = "overpass_query.geojson"
@@ -273,18 +318,26 @@ def gen_label(cfg, workspace):
                         feats[geom.to_wkb()] = feature
                         break
 
+    print("Start to build geom tree")
     tree = STRtree(geoms)
 
     # clip by tile into small tile geojson
-    for t in cfg.tiles:
-        _box = box(*get_bbox(t))
-        r = tree.query(_box)
 
-        if len(r) != 0:
-            tile = tile_feats.get(t, [])
-            for g in r:
-                tile.append(feats[g.to_wkb()])
-                tile_feats[t] = tile
+    tile_dir = workspace.tile
+    list_path = os.path.join(workspace.other, "tile_list")
+
+    with open(list_path, "w", encoding="utf-8") as f:
+        for _t in tqdm(cfg.tiles):
+            _box = box(*get_bbox(_t))
+            r = tree.query(_box)
+
+            if len(r) != 0:
+                tile = tile_feats.get(_t, [])
+                for g in r:
+                    tile.append(feats[g.to_wkb()])
+                    tile_feats[_t] = tile
+                tile_name = "{0.z}.{0.x}.{0.y}".format(_t)
+                f.write(tile_name + "\n")
 
     # free the variable for gc
     del feats
@@ -331,3 +384,30 @@ def gen_label(cfg, workspace):
                         print(imgIdx)
 
             json.dump(coco.to_json(), f, indent=2)
+
+
+def _overlap(main_geojson, sub_geojson, output_geojson, label):
+    with open(main_geojson, "r") as f:
+        main_data = json.load(f)
+    main_geometries = [shape(feature["geometry"]) for feature in main_data["features"]]
+
+    with open(sub_geojson, "r") as f:
+        sub_data = json.load(f)
+    sub_geometries = [shape(feature["geometry"]) for feature in sub_data["features"]]
+
+    index_tree = STRtree(sub_geometries)
+
+    res_feats = []
+
+    for main_geom in main_geometries:
+        intersecting_geometries = index_tree.query(main_geom)
+        for sub_geom in intersecting_geometries:
+            if main_geom.intersects(sub_geom):
+                # feat = Feature(geometry=main_geom, properties={"label": label})
+                feat = Feature(geometry=main_geom)
+                res_feats.append(feat)
+                break
+    fc = FeatureCollection(res_feats)
+
+    with open(output_geojson, "w") as f:
+        geojson.dump(fc, f)

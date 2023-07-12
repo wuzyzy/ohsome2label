@@ -276,15 +276,21 @@ def gen_label(cfg, workspace):
     tree = STRtree(geoms)
 
     # clip by tile into small tile geojson
-    for t in cfg.tiles:
-        _box = box(*get_bbox(t))
-        r = tree.query(_box)
 
-        if len(r) != 0:
-            tile = tile_feats.get(t, [])
-            for g in r:
-                tile.append(feats[g.to_wkb()])
-                tile_feats[t] = tile
+    list_path = os.path.join(workspace.other, "tile_list")
+
+    with open(list_path, "w", encoding="utf-8") as f:
+        for t in cfg.tiles:
+            _box = box(*get_bbox(t))
+            r = tree.query(_box)
+
+            if len(r) != 0:
+                tile = tile_feats.get(t, [])
+                for g in r:
+                    tile.append(feats[g.to_wkb()])
+                    tile_feats[t] = tile
+                tile_name = "{0.z}.{0.x}.{0.y}".format(t)
+                f.write(tile_name + "\n")
 
     # free the variable for gc
     del feats

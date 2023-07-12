@@ -103,7 +103,8 @@ def download_img(cfg, workspace):
     param cfg: ohsome2label.config.o2l_config
     param workspace: ohsome2label.config.workspace
     """
-    tgt_dir = workspace.tmp
+    # tgt_dir = workspace.tmp
+    tgt_dir = workspace.img
     tile_list = os.path.join(workspace.other, "tile_list")
     tiles = []
     with open(tile_list, "r") as tl:
